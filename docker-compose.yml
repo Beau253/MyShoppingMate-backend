@@ -1,0 +1,122 @@
+# Docker Compose file version. Version 3.8 is a modern, stable choice.
+version: '3.8'
+
+# Defines all the containers (services) that make up our application.
+services:
+
+  # =======================================================================
+  # DATABASE & INFRASTRUCTURE SERVICES
+  # =======================================================================
+
+  # PostgreSQL Database for transactional data (users, lists).
+  postgres:
+    image: postgres:14-alpine # Use a specific, lightweight version.
+    container_name: msm_postgres
+    environment:
+      # These are the credentials the database will be created with.
+      # Our services will use these to connect.
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: myshoppingmatedb
+    ports:
+      # Expose the database port to the host machine for easy inspection.
+      # Format is "HOST_PORT:CONTAINER_PORT"
+      - "5432:5432"
+    volumes:
+      # Persist the database data on the host machine in a 'pgdata' directory.
+      # This ensures your data is not lost when the container is stopped.
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  # MongoDB for product catalog data.
+  mongo:
+    image: mongo:5.0
+    container_name: msm_mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: myuser
+      MONGO_INITDB_ROOT_PASSWORD: mypassword
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    networks:
+      - app-network
+
+  # RabbitMQ for our asynchronous message queue.
+  rabbitmq:
+    image: rabbitmq:3.9-management
+    container_name: msm_rabbitmq
+    ports:
+      # 5672 is the port for the message protocol (AMQP).
+      - "5672:5672"
+      # 15672 is for the web-based management UI.
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: myuser
+      RABBITMQ_DEFAULT_PASS: mypassword
+    networks:
+      - app-network
+
+  # Traefik API Gateway to route requests to our services.
+  traefik:
+    image: traefik:v2.9
+    container_name: msm_traefik
+    command:
+      # Entry points define which ports Traefik listens on.
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:8000"
+    ports:
+      # The main API port for the mobile app to connect to.
+      - "8000:8000"
+      # The Traefik dashboard for visualizing routes and services.
+      - "8080:8080"
+    volumes:
+      # Mount the Docker socket so Traefik can automatically discover other containers.
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - app-network
+
+  # =======================================================================
+  # APPLICATION MICROSERVICES
+  # =======================================================================
+
+  # Authentication Service - The first of our custom services.
+  auth-service:
+    container_name: msm_auth_service
+    # 'build' tells Docker Compose to build this service from a Dockerfile.
+    build:
+      context: ./services/auth-service # The location of the Dockerfile.
+    # 'depends_on' ensures that the database is started before this service attempts to connect.
+    depends_on:
+      - postgres
+    environment:
+      # Pass environment variables to the service container.
+      # These should match the credentials defined for the postgres service.
+      DATABASE_URL: "postgresql://myuser:mypassword@postgres:5432/myshoppingmatedb"
+      JWT_SECRET: "averysecretkeythatshouldbefromdotenv"
+      PORT: 3000
+    networks:
+      - app-network
+    # --- Traefik Labels ---
+    # These special labels are read by the Traefik gateway to configure routing.
+    labels:
+      - "traefik.enable=true"
+      # This rule says: if a request comes to the 'web' entry point (port 8000)
+      # and the path starts with /auth, route it to this service on its internal port 3000.
+      - "traefik.http.routers.auth-service.rule=PathPrefix(`/auth`)"
+      - "traefik.http.routers.auth-service.entrypoints=web"
+      - "traefik.http.services.auth-service.loadbalancer.server.port=3000"
+
+# Volumes define named data volumes for data persistence.
+volumes:
+  pgdata:
+  mongodata:
+
+# Networks define a shared network for containers to communicate with each other.
+# This allows 'auth-service' to connect to 'postgres' using its service name.
+networks:
+  app-network:
+    driver: bridge
