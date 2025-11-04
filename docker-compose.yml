@@ -8,24 +8,22 @@ services:
   # DATABASE & INFRASTRUCTURE SERVICES
   # =======================================================================
 
-  # PostgreSQL Database for transactional data (users, lists).
   postgres:
-    image: postgres:14-alpine # Use a specific, lightweight version.
+    image: postgres:14-alpine
     container_name: msm_postgres
     environment:
-      # These are the credentials the database will be created with.
-      # Our services will use these to connect.
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
       POSTGRES_DB: myshoppingmatedb
     ports:
-      # Expose the database port to the host machine for easy inspection.
-      # Format is "HOST_PORT:CONTAINER_PORT"
       - "5432:5432"
     volumes:
-      # Persist the database data on the host machine in a 'pgdata' directory.
-      # This ensures your data is not lost when the container is stopped.
+      # This line persists the database data.
       - pgdata:/var/lib/postgresql/data
+      # --- THIS IS THE NEW LINE ---
+      # This maps our local SQL file into the container's init directory.
+      # It will only run if the 'pgdata' volume is empty (on first startup).
+      - ./infrastructure/postgres/01-init-schema.sql:/docker-entrypoint-initdb.d/01-init-schema.sql
     networks:
       - app-network
 
