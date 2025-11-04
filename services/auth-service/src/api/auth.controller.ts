@@ -31,16 +31,12 @@ export const authController = {
       const passwordHash = await bcrypt.hash(password, salt);
 
       // --- Insert new user into the database ---
-      // We are only inserting into the 'users' table for now.
       const newUserQuery = `
         INSERT INTO users (name, email, password_hash) 
         VALUES ($1, $2, $3) 
         RETURNING public_id, name, email;
       `;
       const newUser = await pool.query(newUserQuery, [name, email, passwordHash]);
-      
-      // We would also need a `user_credentials` table in a full implementation,
-      // but this is sufficient for now.
 
       res.status(201).json({
         message: 'User registered successfully.',
@@ -57,7 +53,48 @@ export const authController = {
    * Login an existing user.
    */
   login: async (req: Request, res: Response) => {
-    // --- Placeholder for now ---
-    res.status(200).json({ message: 'Login placeholder' });
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    try {
+      // --- Find the user by email ---
+      const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+      if (userResult.rows.length === 0) {
+        // Use a generic error message to prevent email enumeration attacks.
+        return res.status(401).json({ message: 'Invalid credentials.' });
+      }
+      const user = userResult.rows[0];
+
+      // --- Compare the provided password with the stored hash ---
+      const isMatch = await bcrypt.compare(password, user.password_hash);
+      if (!isMatch) {
+        return res.status(401).json({ message: 'Invalid credentials.' });
+      }
+
+      // --- Generate a JWT ---
+      const payload = {
+        userId: user.public_id,
+        email: user.email,
+      };
+
+      const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '1h' }); // Token expires in 1 hour
+
+      res.status(200).json({
+        message: 'Login successful.',
+        token: token,
+        user: {
+            public_id: user.public_id,
+            name: user.name,
+            email: user.email,
+        }
+      });
+
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({ message: 'Internal server error during login.' });
+    }
   },
 };
