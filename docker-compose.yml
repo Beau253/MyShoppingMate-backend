@@ -105,22 +105,14 @@ services:
     # These special labels are read by the Traefik gateway to configure routing.
     labels:
       - "traefik.enable=true"
-      
-      # --- MISSING PART: THE ROUTER DEFINITION ---
+
       # This rule says: if a request comes to the 'web' entry point (port 8000)
-      # and the path starts with /auth, then this router (named 'auth-service') is a match.
+      # and the path starts with /auth, route it to this service.
+      # We are REMOVING the StripPrefix middleware. The full path will now be forwarded.
       - "traefik.http.routers.auth-service.rule=PathPrefix(`/auth`)"
       - "traefik.http.routers.auth-service.entrypoints=web"
       
-      # --- THE MIDDLEWARE (You had this part correct) ---
-      # 1. Define a middleware called 'strip-auth-prefix' that strips the '/auth' prefix.
-      - "traefik.http.middlewares.strip-auth-prefix.stripprefix.prefixes=/auth"
-      
-      # 2. Apply this middleware to our router.
-      - "traefik.http.routers.auth-service.middlewares=strip-auth-prefix"
-      
-      # --- THE SERVICE (You also had this part correct) ---
-      # This tells the router where to send the traffic it has processed.
+      # This line tells the router where to send the traffic.
       - "traefik.http.services.auth-service.loadbalancer.server.port=3000"
 
 # Volumes define named data volumes for data persistence.
