@@ -13,6 +13,10 @@ COPY package*.json ./
 # Install all production dependencies.
 RUN npm install
 
+# --- FIX: Ensure the TypeScript compiler is executable ---
+# Some environments might strip executable permissions, this command restores them.
+RUN chmod +x /usr/src/app/node_modules/.bin/tsc
+
 # Copy the rest of our source code into the container.
 COPY . .
 
