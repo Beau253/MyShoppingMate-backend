@@ -1,0 +1,17 @@
+# Ignore Node.js dependency folders
+node_modules
+npm-debug.log
+
+# Ignore build artifacts
+dist
+build
+
+# Ignore local environment files
+.env
+
+# Ignore git and docker files
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
