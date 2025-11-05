@@ -153,6 +153,24 @@ services:
       - "traefik.http.routers.product-service.entrypoints=web"
       - "traefik.http.services.product-service.loadbalancer.server.port=3002"
 
+  # Price Data Service
+  price-data-service:
+    container_name: msm_price_data_service
+    build:
+      context: ./services/price-data-service
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: "postgresql://myuser:mypassword@postgres:5432/myshoppingmatedb"
+      PORT: 3003 # Use a different internal port
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.price-service.rule=PathPrefix(`/prices`)"
+      - "traefik.http.routers.price-service.entrypoints=web"
+      - "traefik.http.services.price-service.loadbalancer.server.port=3003"
+
 # Volumes define named data volumes for data persistence.
 volumes:
   pgdata:
