@@ -108,7 +108,6 @@ services:
 
       # This rule says: if a request comes to the 'web' entry point (port 8000)
       # and the path starts with /auth, route it to this service.
-      # We are REMOVING the StripPrefix middleware. The full path will now be forwarded.
       - "traefik.http.routers.auth-service.rule=PathPrefix(`/auth`)"
       - "traefik.http.routers.auth-service.entrypoints=web"
       
@@ -130,7 +129,6 @@ services:
       - app-network
     labels:
       - "traefik.enable=true"
-      # --- THIS IS THE CORRECTED LINE ---
       # Be more explicit: match the exact path OR any sub-path.
       - "traefik.http.routers.list-service.rule=Path(`/lists`) || PathPrefix(`/lists/`)"
       - "traefik.http.routers.list-service.entrypoints=web"
