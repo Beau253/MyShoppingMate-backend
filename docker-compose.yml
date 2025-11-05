@@ -130,7 +130,9 @@ services:
       - app-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.list-service.rule=PathPrefix(`/lists`)"
+      # --- THIS IS THE CORRECTED LINE ---
+      # Be more explicit: match the exact path OR any sub-path.
+      - "traefik.http.routers.list-service.rule=Path(`/lists`) || PathPrefix(`/lists/`)"
       - "traefik.http.routers.list-service.entrypoints=web"
       - "traefik.http.services.list-service.loadbalancer.server.port=3001"
 
