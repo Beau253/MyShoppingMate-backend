@@ -136,6 +136,25 @@ services:
       - "traefik.http.routers.list-service.entrypoints=web"
       - "traefik.http.services.list-service.loadbalancer.server.port=3001"
 
+  # Product Catalog Service
+  product-catalog-service:
+    container_name: msm_product_catalog_service
+    build:
+      context: ./services/product-catalog-service
+    depends_on:
+      - mongo
+    environment:
+      # Connection string for MongoDB. The authSource=admin is crucial.
+      MONGO_URI: "mongodb://myuser:mypassword@mongo:27017/myshoppingmatedb?authSource=admin"
+      PORT: 3002 # Use a different internal port
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.product-service.rule=PathPrefix(`/products`)"
+      - "traefik.http.routers.product-service.entrypoints=web"
+      - "traefik.http.services.product-service.loadbalancer.server.port=3002"
+
 # Volumes define named data volumes for data persistence.
 volumes:
   pgdata:
