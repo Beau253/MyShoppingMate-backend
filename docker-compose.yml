@@ -192,6 +192,18 @@ services:
       - "traefik.http.routers.price-service.entrypoints=web"
       - "traefik.http.services.price-service.loadbalancer.server.port=3003"
 
+  # Data Ingestion Worker
+  data-ingestion-worker:
+    container_name: msm_data_ingestion_worker
+    build:
+      context: ./services/data-ingestion-worker
+    depends_on:
+      - rabbitmq # This worker depends on the message broker
+    environment:
+      RABBITMQ_URI: "amqp://myuser:mypassword@rabbitmq"
+    networks:
+      - app-network
+
 # Volumes define named data volumes for data persistence.
 volumes:
   pgdata:
