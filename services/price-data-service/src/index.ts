@@ -1,11 +1,12 @@
 import express from 'express';
 import cors from 'cors';
-import { connectDB as testDbConnection } from './data/db'; // Rename for consistency
+import { connectDB } from './data/db'; 
 import priceRoutes from './api/price.routes';
 import { config } from './config';
 
 const startServer = async () => {
-  await testDbConnection();
+  // Call the function
+  await connectDB();
 
   const app = express();
   app.use(cors());

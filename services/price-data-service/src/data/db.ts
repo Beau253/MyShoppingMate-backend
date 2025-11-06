@@ -5,7 +5,7 @@ export const pool = new Pool({
   connectionString: config.databaseUrl,
 });
 
-export const testDbConnection = async () => {
+export const connectDB = async () => {
   try {
     await pool.query('SELECT NOW()');
     console.log('Database connection successful.');
