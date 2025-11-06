@@ -1,80 +1,84 @@
-import puppeteer from 'puppeteer';
+import axios from 'axios';
 
-// A placeholder interface for the scraped data.
-interface ScrapedProduct {
-  name: string;
-  price: string;
-  // Add other fields as needed, e.g., brand, imageUrl
+// Define interfaces to type the incoming JSON data from the API.
+// This provides type safety and autocompletion.
+interface WoolworthsProduct {
+  Name: string;
+  DisplayName: string;
+  Price: number;
+  InstorePrice: number;
+  Barcode: string;
+  Brand: string;
+  SmallImageFile: string;
+  PackageSize: string;
+}
+
+interface WoolworthsResponse {
+  Products: {
+    Products: WoolworthsProduct[];
+  }[];
+  SearchResultsCount: number;
 }
 
 /**
- * Scrapes Woolworths for a given search query.
- * NOTE: CSS Selectors are EXTREMELY brittle and will break when the website changes.
- * These are examples and will need to be updated by inspecting the live website.
+ * Scrapes Woolworths for a given search query by calling their private API.
  */
-async function scrapeWoolworths(query: string): Promise<ScrapedProduct[]> {
-  console.log(`[ScraperService] Starting scrape for "${query}" on Woolworths.`);
-  const browser = await puppeteer.launch({
-    // These args are crucial for running in a Docker container
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-  const page = await browser.newPage();
+async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<any[]> {
+  const url = 'https://www.woolworths.com.au/apis/ui/Search/products';
+
+  const payload = {
+    SearchTerm: query,
+    PageNumber: page,
+    PageSize: 36, // As seen in the provided data
+    SortType: "TraderRelevance",
+    // Add other payload fields if necessary
+  };
+
+  const headers = {
+    'Content-Type': 'application/json',
+    // Mimic a real browser user-agent
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+  };
+
+  console.log(`[ScraperService] Posting to Woolworths API for query: "${query}", page: ${page}`);
 
   try {
-    // Set a realistic user agent
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    const response = await axios.post<WoolworthsResponse>(url, payload, { headers });
     
-    await page.goto('https://www.woolworths.com.au/', { waitUntil: 'networkidle2' });
+    // The response is nested, so we need to extract the relevant product array.
+    const products = response.data.Products.flatMap(p => p.Products);
 
-    // Type the query into the search bar
-    // The selector '#wx-header-search-bar' is an example and might change.
-    await page.type('#wx-header-search-bar', query, { delay: 100 });
-    
-    // Click the search button and wait for navigation
-    await Promise.all([
-      page.keyboard.press('Enter'),
-      page.waitForNavigation({ waitUntil: 'networkidle2' }),
-    ]);
+    console.log(`[ScraperService] Found ${products.length} products on page ${page}. Total results: ${response.data.SearchResultsCount}`);
 
-    console.log(`[ScraperService] Navigated to results page for "${query}".`);
+    // Map the complex API response to our simpler, unified data model.
+    const formattedProducts = products.map(p => ({
+        gtin: p.Barcode,
+        name: p.DisplayName,
+        brand: p.Brand,
+        price: p.InstorePrice, // Use InstorePrice as it's the most relevant
+        imageUrl: p.SmallImageFile,
+        size: p.PackageSize,
+        store: 'Woolworths',
+    }));
 
-    // Now, execute code inside the browser to extract the data
-    const products = await page.evaluate(() => {
-      const results: ScrapedProduct[] = [];
-      // This selector is also an example. You must inspect the live site to find the correct one.
-      const productTiles = document.querySelectorAll('div.product-tile-v2');
+    return formattedProducts;
 
-      productTiles.forEach(tile => {
-        const nameElement = tile.querySelector('.product-title-link') as HTMLElement;
-        const priceElement = tile.querySelector('.price') as HTMLElement;
-
-        if (nameElement && priceElement) {
-          results.push({
-            name: nameElement.innerText.trim(),
-            price: priceElement.innerText.trim(),
-          });
-        }
-      });
-      return results;
-    });
-
-    console.log(`[ScraperService] Found ${products.length} products for "${query}".`);
-    return products;
   } catch (error) {
-    console.error('[ScraperService] Error during scraping:', error);
-    return []; // Return an empty array on failure
-  } finally {
-    await browser.close();
-    console.log(`[ScraperService] Browser closed for "${query}".`);
+    console.error('[ScraperService] Error calling Woolworths API:', error);
+    return [];
   }
 }
+
 
 export const scraperService = {
   scrape: (target: string, query: string) => {
     switch (target.toLowerCase()) {
       case 'woolworths':
-        return scrapeWoolworths(query);
-      // Add cases for 'coles', 'aldi', etc. here
+        // For now, we are only fetching the first page. Pagination logic can be added here.
+        return scrapeWoolworthsAPI(query, 1);
+      
+      // Cases for 'coles', 'aldi' would be added here. They would likely
+      // require the Puppeteer approach if they don't have a clear API like this.
       default:
         console.warn(`[ScraperService] No scraper found for target: ${target}`);
         return Promise.resolve([]);
