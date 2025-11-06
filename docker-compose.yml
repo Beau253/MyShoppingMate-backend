@@ -162,6 +162,27 @@ services:
       - postgres
     environment:
       DATABASE_URL: "postgresql://myuser:mypassword@postgres:5432/myshoppingmatedb"
+      PORT: 3003
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      # --- THIS IS THE CORRECTED LINE ---
+      # Be more explicit: match the exact path OR any sub-path.
+      - "traefik.http.routers.price-service.rule=Path(`/prices`) || PathPrefix(`/prices/`)"
+      - "traefik.http.routers.price-service.entrypoints=web"
+      - "traefik.http.services.price-service.loadbalancer.server.port=3003"
+
+
+  # Price Data Service
+  price-data-service:
+    container_name: msm_price_data_service
+    build:
+      context: ./services/price-data-service
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: "postgresql://myuser:mypassword@postgres:5432/myshoppingmatedb"
       PORT: 3003 # Use a different internal port
     networks:
       - app-network
