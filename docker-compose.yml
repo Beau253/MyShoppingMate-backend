@@ -8,29 +8,21 @@ services:
   # DATABASE & INFRASTRUCTURE SERVICES
   # =======================================================================
 
-  # PostgreSQL Database for transactional data (users, lists).
   postgres:
-    image: postgres:14-alpine # Use a specific, lightweight version.
+    image: postgres:14-alpine
     container_name: msm_postgres
     environment:
-      # These are the credentials the database will be created with.
-      # Our services will use these to connect.
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
       POSTGRES_DB: myshoppingmatedb
     ports:
-      # Expose the database port to the host machine for easy inspection.
-      # Format is "HOST_PORT:CONTAINER_PORT"
       - "5432:5432"
     volumes:
-      # Persist the database data on the host machine in a 'pgdata' directory.
-      # This ensures your data is not lost when the container is stopped.
       - pgdata:/var/lib/postgresql/data
       - ./infrastructure/postgres/01-init-schema.sql:/docker-entrypoint-initdb.d/01-init-schema.sql
     networks:
       - app-network
 
-  # MongoDB for product catalog data.
   mongo:
     image: mongo:5.0
     container_name: msm_mongo
@@ -44,14 +36,11 @@ services:
     networks:
       - app-network
 
-  # RabbitMQ for our asynchronous message queue.
   rabbitmq:
     image: rabbitmq:3.9-management
     container_name: msm_rabbitmq
     ports:
-      # 5672 is the port for the message protocol (AMQP).
       - "5672:5672"
-      # 15672 is for the web-based management UI.
       - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: myuser
@@ -59,23 +48,18 @@ services:
     networks:
       - app-network
 
-  # Traefik API Gateway to route requests to our services.
   traefik:
     image: traefik:v2.9
     container_name: msm_traefik
     command:
-      # Entry points define which ports Traefik listens on.
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:8000"
     ports:
-      # The main API port for the mobile app to connect to.
       - "8000:8000"
-      # The Traefik dashboard for visualizing routes and services.
       - "8080:8080"
     volumes:
-      # Mount the Docker socket so Traefik can automatically discover other containers.
       - "/var/run/docker.sock:/var/run/docker.sock"
     networks:
       - app-network
@@ -84,37 +68,24 @@ services:
   # APPLICATION MICROSERVICES
   # =======================================================================
 
-  # Authentication Service - The first of our custom services.
   auth-service:
     container_name: msm_auth_service
-    # 'build' tells Docker Compose to build this service from a Dockerfile.
     build:
-      context: ./services/auth-service # The location of the Dockerfile.
-    # 'depends_on' ensures that the database is started before this service attempts to connect.
+      context: ./services/auth-service
     depends_on:
       - postgres
     environment:
-      # Pass environment variables to the service container.
-      # These should match the credentials defined for the postgres service.
       DATABASE_URL: "postgresql://myuser:mypassword@postgres:5432/myshoppingmatedb"
       JWT_SECRET: "averysecretkeythatshouldbefromdotenv"
       PORT: 3000
     networks:
       - app-network
-    # --- Traefik Labels ---
-    # These special labels are read by the Traefik gateway to configure routing.
     labels:
       - "traefik.enable=true"
-
-      # This rule says: if a request comes to the 'web' entry point (port 8000)
-      # and the path starts with /auth, route it to this service.
       - "traefik.http.routers.auth-service.rule=PathPrefix(`/auth`)"
       - "traefik.http.routers.auth-service.entrypoints=web"
-      
-      # This line tells the router where to send the traffic.
       - "traefik.http.services.auth-service.loadbalancer.server.port=3000"
 
-  # Shopping List Service
   list-service:
     container_name: msm_list_service
     build:
@@ -124,17 +95,15 @@ services:
     environment:
       DATABASE_URL: "postgresql://myuser:mypassword@postgres:5432/myshoppingmatedb"
       JWT_SECRET: "averysecretkeythatshouldbefromdotenv"
-      PORT: 3001 # Use a different internal port to avoid conflicts
+      PORT: 3001
     networks:
       - app-network
     labels:
       - "traefik.enable=true"
-      # Be more explicit: match the exact path OR any sub-path.
       - "traefik.http.routers.list-service.rule=Path(`/lists`) || PathPrefix(`/lists/`)"
       - "traefik.http.routers.list-service.entrypoints=web"
       - "traefik.http.services.list-service.loadbalancer.server.port=3001"
-
-  # Product Catalog Service
+  
   product-catalog-service:
     container_name: msm_product_catalog_service
     build:
@@ -142,9 +111,8 @@ services:
     depends_on:
       - mongo
     environment:
-      # Connection string for MongoDB. The authSource=admin is crucial.
       MONGO_URI: "mongodb://myuser:mypassword@mongo:27017/myshoppingmatedb?authSource=admin"
-      PORT: 3002 # Use a different internal port
+      PORT: 3002
     networks:
       - app-network
     labels:
@@ -153,7 +121,6 @@ services:
       - "traefik.http.routers.product-service.entrypoints=web"
       - "traefik.http.services.product-service.loadbalancer.server.port=3002"
 
-  # Price Data Service
   price-data-service:
     container_name: msm_price_data_service
     build:
@@ -167,31 +134,10 @@ services:
       - app-network
     labels:
       - "traefik.enable=true"
-      # --- THIS IS THE CORRECTED LINE ---
-      # Be more explicit: match the exact path OR any sub-path.
       - "traefik.http.routers.price-service.rule=Path(`/prices`) || PathPrefix(`/prices/`)"
       - "traefik.http.routers.price-service.entrypoints=web"
       - "traefik.http.services.price-service.loadbalancer.server.port=3003"
-
-
-  # Price Data Service
-  price-data-service:
-    container_name: msm_price_data_service
-    build:
-      context: ./services/price-data-service
-    depends_on:
-      - postgres
-    environment:
-      DATABASE_URL: "postgresql://myuser:mypassword@postgres:5432/myshoppingmatedb"
-      PORT: 3003 # Use a different internal port
-    networks:
-      - app-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.price-service.rule=PathPrefix(`/prices`)"
-      - "traefik.http.routers.price-service.entrypoints=web"
-      - "traefik.http.services.price-service.loadbalancer.server.port=3003"
-
+      
   # Data Ingestion Worker
   data-ingestion-worker:
     container_name: msm_data_ingestion_worker
@@ -210,7 +156,6 @@ volumes:
   mongodata:
 
 # Networks define a shared network for containers to communicate with each other.
-# This allows 'auth-service' to connect to 'postgres' using its service name.
 networks:
   app-network:
     driver: bridge
