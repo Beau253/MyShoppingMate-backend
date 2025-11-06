@@ -144,9 +144,14 @@ services:
     build:
       context: ./services/data-ingestion-worker
     depends_on:
-      - rabbitmq # This worker depends on the message broker
+      - rabbitmq
     environment:
       RABBITMQ_URI: "amqp://myuser:mypassword@rabbitmq"
+    # --- THIS IS THE FIX ---
+    # Explicitly set a public DNS server for the container.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     networks:
       - app-network
 
