@@ -1,22 +1,6 @@
-import axios from 'axios';
+import puppeteer, { Browser } from 'puppeteer';
 
-// A placeholder interface for the key data we want to extract.
-interface WoolworthsProduct {
-  DisplayName: string;
-  Price: number;
-  Barcode: string;
-  Brand: string | null;
-  SmallImageFile: string;
-  PackageSize: string;
-}
-
-// Type for the nested structure of the API response.
-interface WoolworthsResponse {
-  Products: {
-    Products: WoolworthsProduct[];
-  }[];
-  SearchResultsCount: number;
-}
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 // A unified data model for a product, regardless of the source.
 interface Product {
@@ -29,67 +13,82 @@ interface Product {
   store: 'Woolworths' | 'Coles'; // Example stores
 }
 /**
- * Scrapes Woolworths by mimicking their internal search API call.
+ * Scrapes Woolworths using a headless browser to mimic user behavior.
  */
 async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Product[]> {
-  const url = 'https://www.woolworths.com.au/apis/ui/Search/products';
-
-  const payload = {
-    SearchTerm: query,
-    PageNumber: page,
-    PageSize: 36,
-    SortType: "TraderRelevance",
-    Location: `/shop/search/products?searchTerm=${query}`
-  };
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json, text/plain, */*',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-  };
-
-  console.log(`[ScraperService] Posting to Woolworths API for query: "${query}", page: ${page}`);
+  let browser: Browser | null = null;
+  console.log(`[ScraperService] Launching headless browser for query: "${query}"`);
 
   try {
-    // Set a 15-second timeout for the request
-    const response = await axios.post<WoolworthsResponse>(url, payload, { headers, timeout: 15000 });
-    
-    if (!response.data || !response.data.Products) {
-      console.log('[ScraperService] Received empty or invalid response from API.');
-      return [];
-    }
+    // Launch Puppeteer. The '--no-sandbox' flag is crucial for running in Docker.
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
 
-    const products = response.data.Products.flatMap((p: { Products: WoolworthsProduct[] }) => p.Products);
+    const browserPage = await browser.newPage();
+    await browserPage.setUserAgent(USER_AGENT);
 
-    console.log(`[ScraperService] Found ${products.length} products on page ${page}. Total available: ${response.data.SearchResultsCount}`);
+    // Construct the URL and navigate to the page.
+    const url = `https://www.woolworths.com.au/shop/search/products?searchTerm=${encodeURIComponent(query)}&pageNumber=${page}`;
+    console.log(`[ScraperService] Navigating to: ${url}`);
+    await browserPage.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // Map the complex API response to our simpler, unified data model.
-    const formattedProducts: Product[] = products.map((p: WoolworthsProduct): Product => ({
-        gtin: p.Barcode,
-        name: p.DisplayName,
-        brand: p.Brand || 'N/A', // Handle null brand
-        price: p.Price,
-        imageUrl: p.SmallImageFile,
-        size: p.PackageSize,
-        store: 'Woolworths',
-    }));
+    // Wait for the main product grid container to ensure the page has loaded products.
+    const productGridSelector = '.product-grid--tile';
+    await browserPage.waitForSelector(productGridSelector, { timeout: 30000 });
 
-    return formattedProducts;
+    console.log('[ScraperService] Page loaded. Scraping product data...');
+
+    // Execute script in the page context to extract product data.
+    const products: Product[] = await browserPage.evaluate((): Product[] => {
+      // This function runs in the browser's context, so it can't access variables from the Node.js scope.
+      const productTiles = document.querySelectorAll('div.product-tile-v2');
+      const results: Product[] = [];
+
+      productTiles.forEach(tile => {
+        const nameEl = tile.querySelector('.product-tile-v2--name') as HTMLElement;
+        const priceEl = tile.querySelector('.product-tile-v2--price') as HTMLElement;
+        const brandEl = tile.querySelector('.product-tile-v2--brand') as HTMLElement;
+        const imageEl = tile.querySelector('img.product-tile-v2--image') as HTMLImageElement;
+        const sizeEl = tile.querySelector('.product-tile-v2--size') as HTMLElement;
+
+        // Extract price, handling the dollar sign and converting to a number.
+        const priceText = priceEl?.innerText.replace('$', '').trim();
+        const price = priceText ? parseFloat(priceText) : 0;
+
+        if (nameEl && price) {
+          results.push({
+            gtin: 'N/A', // Barcode is not available on the search results page.
+            name: nameEl.innerText.trim(),
+            brand: brandEl?.innerText.trim() || 'N/A',
+            price: price,
+            imageUrl: imageEl?.src || '',
+            size: sizeEl?.innerText.trim() || '',
+            store: 'Woolworths',
+          });
+        }
+      });
+
+      return results;
+    });
+
+    console.log(`[ScraperService] Scraped ${products.length} products.`);
+    return products;
 
   } catch (error) {
-    // Axios provides more detailed error info
-    if (axios.isAxiosError(error)) {
-      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
-        console.error(`[ScraperService] Request to Woolworths API timed out: ${error.message}`);
-      } else if (error.response) {
-        console.error(`[ScraperService] Axios error calling Woolworths API: ${error.message}`, { status: error.response.status });
-        console.error(`[ScraperService] Response Data: ${JSON.stringify(error.response.data)}`);
-      }
+    const err = error as Error;
+    if (err.name === 'TimeoutError') {
+      console.error(`[ScraperService] Navigation or selector timeout: ${err.message}`);
     } else {
-        const err = error as Error;
-        console.error(`[ScraperService] A general error occurred: ${err.message}`);
+      console.error(`[ScraperService] An error occurred during headless browser scraping: ${err.message}`);
     }
     return [];
+  } finally {
+    if (browser) {
+      console.log('[ScraperService] Closing browser.');
+      await browser.close();
+    }
   }
 }
 
@@ -97,7 +96,7 @@ export const scraperService = {
   scrape: (target: string, query: string) => {
     switch (target.toLowerCase()) {
       case 'woolworths':
-        return scrapeWoolworthsAPI(query, 1);
+        return scrapeWoolworthsAPI(query);
       default:
         console.warn(`[ScraperService] No scraper found for target: ${target}`);
         return Promise.resolve([]);
