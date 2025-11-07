@@ -18,10 +18,20 @@ interface WoolworthsResponse {
   SearchResultsCount: number;
 }
 
+// A unified data model for a product, regardless of the source.
+interface Product {
+  gtin: string;
+  name: string;
+  brand: string;
+  price: number;
+  imageUrl: string;
+  size: string;
+  store: 'Woolworths' | 'Coles'; // Example stores
+}
 /**
  * Scrapes Woolworths by mimicking their internal search API call.
  */
-async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<any[]> {
+async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Product[]> {
   const url = 'https://www.woolworths.com.au/apis/ui/Search/products';
 
   const payload = {
@@ -35,13 +45,14 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<any
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json, text/plain, */*',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5.37.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
   };
 
   console.log(`[ScraperService] Posting to Woolworths API for query: "${query}", page: ${page}`);
 
   try {
-    const response = await axios.post<WoolworthsResponse>(url, payload, { headers });
+    // Set a 15-second timeout for the request
+    const response = await axios.post<WoolworthsResponse>(url, payload, { headers, timeout: 15000 });
     
     if (!response.data || !response.data.Products) {
       console.log('[ScraperService] Received empty or invalid response from API.');
@@ -67,9 +78,13 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<any
 
   } catch (error) {
     // Axios provides more detailed error info
-    if (axios.isAxiosError(error) && error.response) {
+    if (axios.isAxiosError(error)) {
+      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        console.error(`[ScraperService] Request to Woolworths API timed out: ${error.message}`);
+      } else if (error.response) {
         console.error(`[ScraperService] Axios error calling Woolworths API: ${error.message}`, { status: error.response.status });
         console.error(`[ScraperService] Response Data: ${JSON.stringify(error.response.data)}`);
+      }
     } else {
         const err = error as Error;
         console.error(`[ScraperService] A general error occurred: ${err.message}`);
