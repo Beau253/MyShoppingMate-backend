@@ -64,7 +64,7 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
     console.log(`[ScraperService] Found ${products.length} products on page ${page}. Total available: ${response.data.SearchResultsCount}`);
 
     // Map the complex API response to our simpler, unified data model.
-    const formattedProducts = products.map((p: WoolworthsProduct) => ({
+    const formattedProducts: Product[] = products.map((p: WoolworthsProduct): Product => ({
         gtin: p.Barcode,
         name: p.DisplayName,
         brand: p.Brand || 'N/A', // Handle null brand
