@@ -147,6 +147,7 @@ services:
       - rabbitmq
     environment:
       RABBITMQ_URI: "amqp://myuser:mypassword@rabbitmq"
+    shm_size: '2gb' # Increase shared memory to prevent headless Chrome crashes.
     # --- THIS IS THE FIX ---
     # Explicitly set a public DNS server for the container.
     dns:

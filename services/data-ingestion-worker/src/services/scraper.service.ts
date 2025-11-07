@@ -1,4 +1,8 @@
-import puppeteer, { Browser } from 'puppeteer';
+// Use puppeteer-extra and the stealth plugin to avoid bot detection.
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { Browser } from 'puppeteer';
+puppeteer.use(StealthPlugin());
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const API_URL = 'https://www.woolworths.com.au/apis/ui/Search/products';
@@ -23,11 +27,17 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
     // Launch Puppeteer. The '--no-sandbox' flag is crucial for running in Docker.
     browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage' // Prevent shared memory issues in Docker
+      ],
     });
 
     const browserPage = await browser.newPage();
     await browserPage.setUserAgent(USER_AGENT);
+    // Set a realistic viewport to mimic a real user.
+    await browserPage.setViewport({ width: 1920, height: 1080 });
 
     // Set up a promise to resolve with the product data when the API call is intercepted.
     const productsPromise = new Promise<Product[]>((resolve, reject) => {
@@ -62,7 +72,11 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
     // JavaScript to make the background API call we are intercepting.
     const url = `https://www.woolworths.com.au/shop/search/products?searchTerm=${encodeURIComponent(query)}&pageNumber=${page}`;
     console.log(`[ScraperService] Navigating to: ${url}`);
-    await browserPage.goto(url, { waitUntil: 'networkidle0', timeout: 60000 });
+    // Use 'domcontentloaded' for a faster initial load, then wait for a key element.
+    await browserPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+    // Wait for a specific element that indicates the page's JavaScript has loaded and rendered the results area.
+    await browserPage.waitForSelector('[data-testid="search-results-heading"]', { timeout: 30000 });
 
     console.log('[ScraperService] Page loaded. Waiting for product API response...');
 
