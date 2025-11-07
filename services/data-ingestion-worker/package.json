@@ -11,7 +11,7 @@
   "dependencies": {
     "amqplib": "^0.10.3",
     "dotenv": "^16.0.3",
-    "puppeteer": "^22.13.1"
+    "puppeteer": "^24.15.0"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.1",
