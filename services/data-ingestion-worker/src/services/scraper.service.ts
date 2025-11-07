@@ -48,12 +48,12 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<any
       return [];
     }
 
-    const products = response.data.Products.flatMap(p => p.Products);
+    const products = response.data.Products.flatMap((p: { Products: WoolworthsProduct[] }) => p.Products);
 
     console.log(`[ScraperService] Found ${products.length} products on page ${page}. Total available: ${response.data.SearchResultsCount}`);
 
     // Map the complex API response to our simpler, unified data model.
-    const formattedProducts = products.map(p => ({
+    const formattedProducts = products.map((p: WoolworthsProduct) => ({
         gtin: p.Barcode,
         name: p.DisplayName,
         brand: p.Brand || 'N/A', // Handle null brand
@@ -67,11 +67,12 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<any
 
   } catch (error) {
     // Axios provides more detailed error info
-    if (axios.isAxiosError(error)) {
-        console.error(`[ScraperService] Axios error calling Woolworths API: ${error.message}`);
-        console.error(`[ScraperService] Status: ${error.response?.status}, Data: ${JSON.stringify(error.response?.data)}`);
+    if (axios.isAxiosError(error) && error.response) {
+        console.error(`[ScraperService] Axios error calling Woolworths API: ${error.message}`, { status: error.response.status });
+        console.error(`[ScraperService] Response Data: ${JSON.stringify(error.response.data)}`);
     } else {
-        console.error('[ScraperService] A general error occurred:', error);
+        const err = error as Error;
+        console.error(`[ScraperService] A general error occurred: ${err.message}`);
     }
     return [];
   }
