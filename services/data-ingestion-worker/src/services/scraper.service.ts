@@ -1,13 +1,13 @@
 import puppeteer, { Browser } from 'puppeteer';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const API_URL = 'https://www.woolworths.com.au/apis/ui/Search/products';
 
 // A unified data model for a product, regardless of the source.
 interface Product {
   gtin: string;
   name: string;
   brand: string;
-  price: number;
   imageUrl: string;
   size: string;
   store: 'Woolworths' | 'Coles'; // Example stores
@@ -29,57 +29,58 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
     const browserPage = await browser.newPage();
     await browserPage.setUserAgent(USER_AGENT);
 
-    // Construct the URL and navigate to the page.
-    const url = `https://www.woolworths.com.au/shop/search/products?searchTerm=${encodeURIComponent(query)}&pageNumber=${page}`;
-    console.log(`[ScraperService] Navigating to: ${url}`);
-    await browserPage.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    // Set up a promise to resolve with the product data when the API call is intercepted.
+    const productsPromise = new Promise<Product[]>((resolve, reject) => {
+      browserPage.on('response', async (response) => {
+        if (response.url() === API_URL && response.request().method() === 'POST') {
+          console.log(`[ScraperService] Intercepted API response from: ${response.url()}`);
+          try {
+            const data = await response.json();
+            const products = data.Products || [];
 
-    // Wait for the main product grid container to ensure the page has loaded products.
-    const productGridSelector = '.product-grid--tile';
-    await browserPage.waitForSelector(productGridSelector, { timeout: 30000 });
+            // Map the API response to our unified Product interface.
+            const mappedProducts: Product[] = products.map((product: any) => ({
+              gtin: product.Barcode || 'N/A',
+              name: product.DisplayName,
+              brand: product.Brand || 'N/A',
+              imageUrl: product.LargeImageFile,
+              size: product.PackageSize,
+              store: 'Woolworths',
+            }));
 
-    console.log('[ScraperService] Page loaded. Scraping product data...');
-
-    // Execute script in the page context to extract product data.
-    const products: Product[] = await browserPage.evaluate((): Product[] => {
-      // This function runs in the browser's context, so it can't access variables from the Node.js scope.
-      const productTiles = document.querySelectorAll('div.product-tile-v2');
-      const results: Product[] = [];
-
-      productTiles.forEach(tile => {
-        const nameEl = tile.querySelector('.product-tile-v2--name') as HTMLElement;
-        const priceEl = tile.querySelector('.product-tile-v2--price') as HTMLElement;
-        const brandEl = tile.querySelector('.product-tile-v2--brand') as HTMLElement;
-        const imageEl = tile.querySelector('img.product-tile-v2--image') as HTMLImageElement;
-        const sizeEl = tile.querySelector('.product-tile-v2--size') as HTMLElement;
-
-        // Extract price, handling the dollar sign and converting to a number.
-        const priceText = priceEl?.innerText.replace('$', '').trim();
-        const price = priceText ? parseFloat(priceText) : 0;
-
-        if (nameEl && price) {
-          results.push({
-            gtin: 'N/A', // Barcode is not available on the search results page.
-            name: nameEl.innerText.trim(),
-            brand: brandEl?.innerText.trim() || 'N/A',
-            price: price,
-            imageUrl: imageEl?.src || '',
-            size: sizeEl?.innerText.trim() || '',
-            store: 'Woolworths',
-          });
+            resolve(mappedProducts);
+          } catch (e) {
+            const err = e as Error;
+            console.error(`[ScraperService] Error parsing JSON from API response: ${err.message}`);
+            reject(new Error('Failed to parse API response.'));
+          }
         }
       });
-
-      return results;
     });
+
+    // Construct the URL and navigate to the page. This action triggers the website's
+    // JavaScript to make the background API call we are intercepting.
+    const url = `https://www.woolworths.com.au/shop/search/products?searchTerm=${encodeURIComponent(query)}&pageNumber=${page}`;
+    console.log(`[ScraperService] Navigating to: ${url}`);
+    await browserPage.goto(url, { waitUntil: 'networkidle0', timeout: 60000 });
+
+    console.log('[ScraperService] Page loaded. Waiting for product API response...');
+
+    // Wait for the network interception to complete or timeout.
+    const products = await Promise.race([
+      productsPromise,
+      new Promise<Product[]>((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout waiting for API response.')), 30000)
+      ),
+    ]);
 
     console.log(`[ScraperService] Scraped ${products.length} products.`);
     return products;
 
   } catch (error) {
     const err = error as Error;
-    if (err.name === 'TimeoutError') {
-      console.error(`[ScraperService] Navigation or selector timeout: ${err.message}`);
+    if (err.name === 'TimeoutError' || err.message.includes('Timeout waiting for API response')) {
+      console.error(`[ScraperService] Timeout occurred: ${err.message}`);
     } else {
       console.error(`[ScraperService] An error occurred during headless browser scraping: ${err.message}`);
     }
