@@ -27,12 +27,14 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
     // Launch Puppeteer. The '--no-sandbox' flag is crucial for running in Docker.
     browser = await puppeteer.launch({
       headless: true,
+      protocolTimeout: 90000, // Increase internal timeout to 90 seconds
+      dumpio: true, // Enable dumpio for detailed logging
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage' // Prevent shared memory issues in Docker
       ],
-      protocolTimeout: 90000, // Increase internal timeout to 90 seconds
+      
     });
 
     const browserPage = await browser.newPage();
