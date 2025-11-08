@@ -149,7 +149,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
       new Promise<any>((resolve, reject) => { //NOSONAR
         const requestHandler = async (response: any) => {
           if (response.url().startsWith(COLES_SEARCH_API_URL) && response.request().method() === 'GET') {
-            page.removeListener('response', requestHandler); // Clean up listener
+            page.off('response', requestHandler); // Clean up listener
             console.log(`[ScraperService] Intercepted Coles API response from: ${response.url()}`);
             if (response.ok()) {
               try {
