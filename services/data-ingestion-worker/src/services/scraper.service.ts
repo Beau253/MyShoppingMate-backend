@@ -1,12 +1,13 @@
 // Use puppeteer-extra and the stealth plugin to avoid bot detection.
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import { Browser, Page } from 'puppeteer';
+import { Browser, Page, HTTPResponse } from 'puppeteer'; // Import HTTPResponse for typing
 puppeteer.use(StealthPlugin());
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const SEARCH_API_URL = 'https://www.woolworths.com.au/apis/ui/Search/products';
 const COLES_SEARCH_API_URL = 'https://www.coles.com.au/api/bff/products/search';
+const COLES_IMAGE_BASE_URL = 'https://productimages.coles.com.au/productimages'; // Base URL for constructing full image paths
 
 // A unified data model for a product, regardless of the source.
 interface Product {
@@ -144,7 +145,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
     // This is a crucial step. Many sites won't load full content until cookies are accepted.
     try {
       console.log('[ScraperService] Navigating to Coles homepage to handle cookie consent...');
-      await page.goto('https://www.coles.com.au', { waitUntil: 'domcontentloaded' });
+      await page.goto('https://www.coles.com.au', { waitUntil: 'domcontentloaded', timeout: 30000 });
       const acceptButtonSelector = 'button#onetrust-accept-btn-handler';
       await page.waitForSelector(acceptButtonSelector, { timeout: 10000 }); // Wait up to 10s
       await page.click(acceptButtonSelector);
@@ -158,12 +159,11 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
 
     let hasMorePages = true;
     let pageNumber = 1;
-    const pageSize = 48; // Coles API uses a page size of 48
 
     // Use a promise-based approach to handle the interception for each page.
-    const responsePromise = (page: Page) =>
-      new Promise<any>((resolve, reject) => { //NOSONAR
-        const requestHandler = async (response: any) => {
+    const responsePromise = (page: Page): Promise<any> =>
+      new Promise((resolve, reject) => { //NOSONAR
+        const requestHandler = async (response: HTTPResponse) => {
           if (response.url().startsWith(COLES_SEARCH_API_URL) && response.request().method() === 'GET') {
             page.off('response', requestHandler); // Clean up listener
             console.log(`[ScraperService] Intercepted Coles API response from: ${response.url()}`);
@@ -189,42 +189,43 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
 
       // Start navigation and listening for the response concurrently to avoid a race condition.
       const interceptionPromise = responsePromise(page);
-      const navigationPromise = page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
       // Wait for both the API interception and the page navigation to complete.
       // We only care about the result from the interception.
       const data = await interceptionPromise;
       const results = data.results || [];
 
-      if (results.length === 0) {
+      // Check if this is the last page
+      if (results.length === 0 || results.length < 48 /* Coles page size */) {
         hasMorePages = false;
-        console.log(`[ScraperService] Page ${pageNumber} has no products. Ending pagination.`);
-        continue;
+        console.log(`[ScraperService] Page ${pageNumber} has fewer than 48 products. Assuming this is the last page.`);
       }
 
       console.log(`[ScraperService] Scraped ${results.length} raw products from page ${pageNumber}.`);
 
-      const mappedProducts: Product[] = results.map((product: any) => {
-        // The Coles API has a different structure, so we map it to our unified 'Product' interface.
-        return {
-          gtin: product.adId || 'N/A', // 'adId' often corresponds to the GTIN.
-          name: product.name,
-          brand: product.brand,
-          price: product.pricing?.now || 0,
-          // Image URL is often in a nested _links object.
-          imageUrl: product._links?.image?.href || '',
-          size: product.size,
-          store: 'Coles' as const,
-          // Coles API doesn't provide rich category data in the search response, so we start with an empty array.
-          categories: [],
-        };
+      const mappedProducts: Product[] = results
+        .filter((p: any) => p._type === 'PRODUCT') // Filter out ad tiles
+        .map((product: any) => {
+          // --- CORRECTED MAPPING LOGIC BASED ON HAR ANALYSIS ---
+          const imageUrl = (product.imageUris && product.imageUris.length > 0)
+              ? `${COLES_IMAGE_BASE_URL}${product.imageUris[0].uri}`
+              : '';
+
+          return {
+            gtin: String(product.id || 'N/A'), // Use product.id, not adId
+            name: product.name || 'N/A',
+            brand: product.brand || 'N/A',
+            price: product.pricing?.now || 0,
+            imageUrl: imageUrl, // Use the correctly constructed image URL
+            size: product.size || 'N/A',
+            store: 'Coles' as const,
+            categories: [], // Still no category data from this endpoint
+          };
       });
 
       allProducts.push(...mappedProducts);
       pageNumber++;
-
-      // A small delay to mimic human behavior and reduce load.
-      await new Promise(res => setTimeout(res, 1000));
     }
 
     console.log(`[ScraperService] Coles pagination complete. Total products: ${allProducts.length}.`);
@@ -233,6 +234,11 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
   } catch (error) {
     const err = error as Error;
     console.error(`[ScraperService] An error occurred during Coles scraping: ${err.message}`);
+    // Capture a screenshot on error for debugging
+    if (browser) {
+        const page = (await browser.pages())[0];
+        await page.screenshot({ path: 'coles_error_screenshot.png' });
+    }
     return allProducts; // Return what we have so far.
   } finally {
     if (browser) {

@@ -148,10 +148,6 @@ services:
     environment:
       RABBITMQ_URI: "amqp://myuser:mypassword@rabbitmq"
     shm_size: '2gb' # Increase shared memory to prevent headless Chrome crashes.
-    # Explicitly set a public DNS server for the container.
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     networks:
       - app-network
 
