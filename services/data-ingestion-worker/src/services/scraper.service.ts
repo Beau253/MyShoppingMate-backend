@@ -73,15 +73,16 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
       });
     });
 
+    // Start navigation and listening for the response concurrently to avoid a race condition.
     const searchUrl = `https://www.woolworths.com.au/shop/search/products?searchTerm=${encodeURIComponent(query)}&pageNumber=${page}`;
     console.log(`[ScraperService] Navigating to: ${searchUrl}`);
-    await browserPage.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    
-    // Wait for the summary interception to complete.
-    const summaries = await Promise.race([
-      productSummariesPromise,
-      new Promise<ProductSummary[]>((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for SUMMARY API response.')), 30000)),
-    ]);
+    const navigationPromise = browserPage.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+    // Wait for either the navigation to fail or the summary interception to complete.
+    const summaries = await Promise.all([
+      productSummariesPromise, // This will resolve when the API response is intercepted.
+      navigationPromise,       // This will resolve when the page navigation is done.
+    ]).then(([summaries]) => summaries); // We only need the result from the interception promise.
     
     if (summaries.length === 0) {
         console.log('[ScraperService] No products found in the summary list. Exiting.');
