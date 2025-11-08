@@ -28,7 +28,7 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
     browser = await puppeteer.launch({
       headless: true,
       protocolTimeout: 90000, // Increase internal timeout to 90 seconds
-      dumpio: true, // Enable dumpio for detailed logging
+      dumpio: false, // Disable dumpio for cleaner logs now that it's working
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -76,13 +76,10 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
     // JavaScript to make the background API call we are intercepting.
     const url = `https://www.woolworths.com.au/shop/search/products?searchTerm=${encodeURIComponent(query)}&pageNumber=${page}`;
     console.log(`[ScraperService] Navigating to: ${url}`);
-    // Use 'domcontentloaded' for a faster initial load, then wait for a key element.
+    // We only need to trigger the navigation. The 'response' listener will handle the rest.
     await browserPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    // Wait for a specific element that indicates the page's JavaScript has loaded and rendered the results area.
-    await browserPage.waitForSelector('[data-testid="search-results-heading"]', { timeout: 30000 });
-
-    console.log('[ScraperService] Page loaded. Waiting for product API response...');
+    console.log('[ScraperService] Page navigation complete. Waiting for product API response...');
 
     // Wait for the network interception to complete or timeout.
     const products = await Promise.race([
