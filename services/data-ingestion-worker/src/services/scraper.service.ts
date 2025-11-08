@@ -55,7 +55,8 @@ async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = 
     console.log('[ScraperService] Executing filtered search via fetch...');
     const products = await browserPage.evaluate(
       async (apiUrl, searchTerm, filterList, pageNum) => {
-        const response = await fetch(apiUrl, {
+        // Using .then() chains instead of async/await to avoid transpilation issues inside evaluate().
+        return fetch(apiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -65,36 +66,35 @@ async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = 
             PageNumber: pageNum,
             PageSize: 36,
             SortType: 'TraderRelevance',
-            Filters: filterList, // Pass the filters into the request body
+            Filters: filterList,
           }),
-        });
-
-        if (!response.ok) {
-          // Throwing an error here will cause the evaluate function to reject.
-          throw new Error(`API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        // The API returns a nested structure: { Products: [ { Products: [ ...actual products... ] } ] }
-        const outerProducts = data.Products || [];
-        const allInnerProducts: any[] = [];
-        outerProducts.forEach((group: any) => {
-          if (group && group.Products) {
-            allInnerProducts.push(...group.Products);
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`API request failed with status ${response.status}`);
           }
+          return response.json();
+        })
+        .then(data => {
+          const outerProducts = data.Products || [];
+          const allInnerProducts: any[] = [];
+          outerProducts.forEach((group: any) => {
+            if (group && group.Products) {
+              allInnerProducts.push(...group.Products);
+            }
+          });
+          
+          // Map the rich data to our unified interface
+          return allInnerProducts.map((product: any) => ({
+            gtin: product.Barcode || 'N/A',
+            name: product.DisplayName,
+            brand: product.Brand || 'N/A',
+            price: product.Price,
+            imageUrl: product.MediumImageFile,
+            size: product.PackageSize,
+            store: 'Woolworths' as const,
+          }));
         });
-
-        // Map the rich data to our unified interface
-        return allInnerProducts.map((product: any) => ({
-          gtin: product.Barcode || 'N/A',
-          name: product.DisplayName,
-          brand: product.Brand || 'N/A',
-          price: product.Price,
-          imageUrl: product.MediumImageFile,
-          size: product.PackageSize,
-          store: 'Woolworths' as const, // Assert the type to match the 'Product' interface
-        }));
       },
       SEARCH_API_URL,
       query,
