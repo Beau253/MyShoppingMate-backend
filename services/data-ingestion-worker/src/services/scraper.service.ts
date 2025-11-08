@@ -146,25 +146,29 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
 
     // Use a promise-based approach to handle the interception for each page.
     const responsePromise = (page: Page) =>
-      new Promise<any>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Timeout waiting for Coles API response.')), 30000);
-        page.once('response', async (response) => {
+      new Promise<any>((resolve, reject) => { //NOSONAR
+        const requestHandler = async (response: any) => {
           if (response.url().startsWith(COLES_SEARCH_API_URL) && response.request().method() === 'GET') {
-            clearTimeout(timeout);
+            page.removeListener('response', requestHandler); // Clean up listener
             console.log(`[ScraperService] Intercepted Coles API response from: ${response.url()}`);
-            try {
-              const data = await response.json();
-              resolve(data);
-            } catch (e) {
-              reject(new Error('Failed to parse Coles API JSON response.'));
+            if (response.ok()) {
+              try {
+                const data = await response.json();
+                resolve(data);
+              } catch (e) {
+                reject(new Error('Failed to parse Coles API JSON response.'));
+              }
+            } else {
+              reject(new Error(`Coles API responded with status ${response.status()}`));
             }
           }
-        });
+        };
+        page.on('response', requestHandler);
+        setTimeout(() => reject(new Error('Timeout waiting for Coles API response.')), 30000);
       });
 
     while (hasMorePages) {
       console.log(`[ScraperService] Scraping Coles page ${pageNumber}...`);
-      const start = (pageNumber - 1) * pageSize;
       const searchUrl = `https://www.coles.com.au/en/search?q=${encodeURIComponent(query)}&page=${pageNumber}`;
 
       // Start navigation and listening for the response concurrently to avoid a race condition.
@@ -173,7 +177,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
 
       // Wait for both the API interception and the page navigation to complete.
       // We only care about the result from the interception.
-      const data = await Promise.all([interceptionPromise, navigationPromise]).then(([interceptionResult]) => interceptionResult);
+      const data = await interceptionPromise;
       const results = data.results || [];
 
       if (results.length === 0) {
