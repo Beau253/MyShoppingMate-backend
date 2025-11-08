@@ -100,6 +100,16 @@ function assignCategoriesToProduct(product: any, categoryMap: Map<string, string
       }
     }
   }
+
+  // --- Contradiction Resolution ---
+  // If a product is categorized as both Low Fat and Full Fat, use the product name as the tie-breaker.
+  if (assignedCategories.has('Low Fat') && assignedCategories.has('Full Fat')) {
+    const productName = (product.DisplayName || '').toLowerCase();
+    if (productName.includes('low fat') || productName.includes('skim') || productName.includes('lite')) {
+      assignedCategories.delete('Full Fat'); // It's definitely a low-fat product.
+    }
+  }
+
   return Array.from(assignedCategories);
 }
 
@@ -107,8 +117,9 @@ function assignCategoriesToProduct(product: any, categoryMap: Map<string, string
 /**
  * Main scraping function, now orchestrating a smarter, decoupled process.
  */
-async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = [], page: number = 1): Promise<Product[]> {
+async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = []): Promise<Product[]> {
   let browser: Browser | null = null;
+  const allEnrichedProducts: Product[] = [];
   console.log(`[ScraperService] Launching browser for query: "${query}" with ${filters.length} filters.`);
 
   try {
@@ -131,63 +142,73 @@ async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = 
     console.log('[ScraperService] Navigating to homepage to establish session...');
     await browserPage.goto('https://www.woolworths.com.au', { waitUntil: 'domcontentloaded' });
 
-    console.log('[ScraperService] Executing search via fetch to get raw data...');
-    const rawData: RawScrapedData = await browserPage.evaluate(
-      (apiUrl, searchTerm, filterList, pageNum) => {
-        return fetch(apiUrl, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            SearchTerm: searchTerm, PageNumber: pageNum, PageSize: 36, SortType: 'TraderRelevance', Filters: filterList,
-          }),
-        })
-        .then(response => {
-          if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
-          return response.json();
-        })
-        .then(data => {
-          // Extract the nested product array
-          const outerProducts = data.Products || [];
-          const allInnerProducts: any[] = [];
-          outerProducts.forEach((group: any) => {
-            if (group && group.Products) allInnerProducts.push(...group.Products);
+    let currentPage = 1;
+    let hasMorePages = true;
+
+    while (hasMorePages) {
+      console.log(`[ScraperService] Scraping page ${currentPage}...`);
+      const rawData: RawScrapedData = await browserPage.evaluate(
+        (apiUrl, searchTerm, filterList, pageNum) => {
+          return fetch(apiUrl, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              SearchTerm: searchTerm, PageNumber: pageNum, PageSize: 36, SortType: 'TraderRelevance', Filters: filterList,
+            }),
+          })
+          .then(response => {
+            if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+            return response.json();
+          })
+          .then(data => {
+            const outerProducts = data.Products || [];
+            const allInnerProducts: any[] = [];
+            outerProducts.forEach((group: any) => {
+              if (group && group.Products) allInnerProducts.push(...group.Products);
+            });
+            return {
+              products: allInnerProducts,
+              aggregations: data.Aggregations || [],
+              facetFilters: data.FacetFilters || [],
+            };
           });
+        },
+        SEARCH_API_URL, query, filters, currentPage
+      );
 
-          // Return the three key pieces of data for processing in Node.js
-          return {
-            products: allInnerProducts,
-            aggregations: data.Aggregations || [],
-            facetFilters: data.FacetFilters || [],
-          };
-        });
-      },
-      SEARCH_API_URL, query, filters, page
-    );
+      if (rawData.products.length === 0) {
+        hasMorePages = false;
+        console.log(`[ScraperService] Page ${currentPage} has no products. Ending pagination.`);
+        continue;
+      }
 
-    console.log(`[ScraperService] Scraped ${rawData.products.length} raw products. Now processing...`);
+      console.log(`[ScraperService] Scraped ${rawData.products.length} raw products from page ${currentPage}. Now processing...`);
 
-    // --- Data Processing Layer (in Node.js) ---
-    const categoryMap = buildCategoryKeywordMap(rawData.aggregations, rawData.facetFilters);
+      const categoryMap = buildCategoryKeywordMap(rawData.aggregations, rawData.facetFilters);
 
-    const enrichedProducts: Product[] = rawData.products.map(product => {
-      return {
-        gtin: product.Barcode || 'N/A',
-        name: product.DisplayName,
-        brand: product.Brand || 'N/A',
-        price: product.Price,
-        imageUrl: product.MediumImageFile,
-        size: product.PackageSize,
-        store: 'Woolworths' as const,
-        categories: assignCategoriesToProduct(product, categoryMap),
-      };
-    });
+      const enrichedProducts: Product[] = rawData.products.map(product => {
+        return {
+          gtin: product.Barcode || 'N/A',
+          name: product.DisplayName,
+          brand: product.Brand || 'N/A',
+          price: product.Price,
+          imageUrl: product.MediumImageFile,
+          size: product.PackageSize,
+          store: 'Woolworths' as const,
+          categories: assignCategoriesToProduct(product, categoryMap),
+        };
+      });
 
-    console.log(`[ScraperService] Processing complete. Returning ${enrichedProducts.length} enriched products.`);
-    return enrichedProducts;
+      allEnrichedProducts.push(...enrichedProducts);
+      currentPage++;
+    }
+
+    console.log(`[ScraperService] Pagination complete. Total enriched products: ${allEnrichedProducts.length}.`);
+    return allEnrichedProducts;
 
   } catch (error) {
     const err = error as Error;
     console.error(`[ScraperService] An error occurred: ${err.message}`);
-    return [];
+    return allEnrichedProducts; // Return whatever was scraped before the error.
   } finally {
     if (browser) {
       console.log('[ScraperService] Closing browser.');
