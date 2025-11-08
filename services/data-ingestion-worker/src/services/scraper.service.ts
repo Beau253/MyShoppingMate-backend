@@ -167,10 +167,13 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
       const start = (pageNumber - 1) * pageSize;
       const searchUrl = `https://www.coles.com.au/en/search?q=${encodeURIComponent(query)}&page=${pageNumber}`;
 
-      const interception = responsePromise(page);
-      await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+      // Start navigation and listening for the response concurrently to avoid a race condition.
+      const interceptionPromise = responsePromise(page);
+      const navigationPromise = page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
 
-      const data = await interception;
+      // Wait for both the API interception and the page navigation to complete.
+      // We only care about the result from the interception.
+      const data = await Promise.all([interceptionPromise, navigationPromise]).then(([interceptionResult]) => interceptionResult);
       const results = data.results || [];
 
       if (results.length === 0) {
