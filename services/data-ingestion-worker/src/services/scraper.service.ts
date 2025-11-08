@@ -93,7 +93,7 @@ async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = 
           price: product.Price,
           imageUrl: product.MediumImageFile,
           size: product.PackageSize,
-          store: 'Woolworths',
+          store: 'Woolworths' as const, // Assert the type to match the 'Product' interface
         }));
       },
       SEARCH_API_URL,
