@@ -144,6 +144,7 @@ async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = 
 
     let currentPage = 1;
     let hasMorePages = true;
+    let previousPageGtins = new Set<string>();
 
     while (hasMorePages) {
       console.log(`[ScraperService] Scraping page ${currentPage}...`);
@@ -179,6 +180,20 @@ async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = 
         hasMorePages = false;
         console.log(`[ScraperService] Page ${currentPage} has no products. Ending pagination.`);
         continue;
+      }
+
+      // --- Duplicate Detection Logic ---
+      // Check if the current page's products are the same as the last page's.
+      const currentPageGtins = new Set(rawData.products.map(p => p.Barcode).filter(Boolean));
+      if (currentPageGtins.size > 0 && Array.from(currentPageGtins).every(gtin => previousPageGtins.has(gtin))) {
+        hasMorePages = false;
+        console.log(`[ScraperService] Page ${currentPage} contains only duplicate products. Ending pagination.`);
+        continue;
+      }
+
+      // If we have new products, update the set for the next iteration.
+      if (currentPageGtins.size > 0) {
+        previousPageGtins = currentPageGtins;
       }
 
       console.log(`[ScraperService] Scraped ${rawData.products.length} raw products from page ${currentPage}. Now processing...`);
