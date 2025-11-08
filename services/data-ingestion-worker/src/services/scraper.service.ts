@@ -6,6 +6,7 @@ puppeteer.use(StealthPlugin());
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const SEARCH_API_URL = 'https://www.woolworths.com.au/apis/ui/Search/products';
+const COLES_SEARCH_API_URL = 'https://www.coles.com.au/api/bff/products/search';
 
 // A unified data model for a product, regardless of the source.
 interface Product {
@@ -113,6 +114,104 @@ function assignCategoriesToProduct(product: any, categoryMap: Map<string, string
   return Array.from(assignedCategories);
 }
 
+/**
+ * Scrapes Coles products using a headless browser to handle the Imperva WAF.
+ * It navigates to the search page and intercepts the JSON response from the BFF API.
+ */
+async function scrapeColesAPI(query: string): Promise<Product[]> {
+  let browser: Browser | null = null;
+  const allProducts: Product[] = [];
+  console.log(`[ScraperService] Launching browser for Coles query: "${query}"`);
+
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      dumpio: false,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    });
+
+    const page = await browser.newPage();
+    await page.setUserAgent(USER_AGENT);
+    await page.setViewport({ width: 1920, height: 1080 });
+
+    let hasMorePages = true;
+    let pageNumber = 1;
+    const pageSize = 48; // Coles API uses a page size of 48
+
+    // Use a promise-based approach to handle the interception for each page.
+    const responsePromise = (page: Page) =>
+      new Promise<any>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Timeout waiting for Coles API response.')), 30000);
+        page.once('response', async (response) => {
+          if (response.url().startsWith(COLES_SEARCH_API_URL) && response.request().method() === 'GET') {
+            clearTimeout(timeout);
+            console.log(`[ScraperService] Intercepted Coles API response from: ${response.url()}`);
+            try {
+              const data = await response.json();
+              resolve(data);
+            } catch (e) {
+              reject(new Error('Failed to parse Coles API JSON response.'));
+            }
+          }
+        });
+      });
+
+    while (hasMorePages) {
+      console.log(`[ScraperService] Scraping Coles page ${pageNumber}...`);
+      const start = (pageNumber - 1) * pageSize;
+      const searchUrl = `https://www.coles.com.au/en/search?q=${encodeURIComponent(query)}&page=${pageNumber}`;
+
+      const interception = responsePromise(page);
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+
+      const data = await interception;
+      const results = data.results || [];
+
+      if (results.length === 0) {
+        hasMorePages = false;
+        console.log(`[ScraperService] Page ${pageNumber} has no products. Ending pagination.`);
+        continue;
+      }
+
+      console.log(`[ScraperService] Scraped ${results.length} raw products from page ${pageNumber}.`);
+
+      const mappedProducts: Product[] = results.map((product: any) => {
+        // The Coles API has a different structure, so we map it to our unified 'Product' interface.
+        return {
+          gtin: product.adId || 'N/A', // 'adId' often corresponds to the GTIN.
+          name: product.name,
+          brand: product.brand,
+          price: product.pricing?.now || 0,
+          // Image URL is often in a nested _links object.
+          imageUrl: product._links?.image?.href || '',
+          size: product.size,
+          store: 'Coles' as const,
+          // Coles API doesn't provide rich category data in the search response, so we start with an empty array.
+          categories: [],
+        };
+      });
+
+      allProducts.push(...mappedProducts);
+      pageNumber++;
+
+      // A small delay to mimic human behavior and reduce load.
+      await new Promise(res => setTimeout(res, 1000));
+    }
+
+    console.log(`[ScraperService] Coles pagination complete. Total products: ${allProducts.length}.`);
+    return allProducts;
+
+  } catch (error) {
+    const err = error as Error;
+    console.error(`[ScraperService] An error occurred during Coles scraping: ${err.message}`);
+    return allProducts; // Return what we have so far.
+  } finally {
+    if (browser) {
+      console.log('[ScraperService] Closing browser.');
+      await browser.close();
+    }
+  }
+}
 
 /**
  * Main scraping function, now orchestrating a smarter, decoupled process.
@@ -238,6 +337,8 @@ export const scraperService = {
     switch (target.toLowerCase()) {
       case 'woolworths':
         return scrapeWoolworthsAPI(query, filters);
+      case 'coles':
+        return scrapeColesAPI(query);
       default:
         console.warn(`[ScraperService] No scraper found for target: ${target}`);
         return Promise.resolve([]);
