@@ -32,6 +32,7 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage' // Prevent shared memory issues in Docker
       ],
+      protocolTimeout: 90000, // Increase internal timeout to 90 seconds
     });
 
     const browserPage = await browser.newPage();
