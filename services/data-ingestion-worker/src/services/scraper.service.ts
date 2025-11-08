@@ -140,6 +140,22 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
     await page.setUserAgent(USER_AGENT);
     await page.setViewport({ width: 1920, height: 1080 });
 
+    // --- NEW: Handle Cookie Consent Banner ---
+    // This is a crucial step. Many sites won't load full content until cookies are accepted.
+    try {
+      console.log('[ScraperService] Navigating to Coles homepage to handle cookie consent...');
+      await page.goto('https://www.coles.com.au', { waitUntil: 'domcontentloaded' });
+      const acceptButtonSelector = 'button#onetrust-accept-btn-handler';
+      await page.waitForSelector(acceptButtonSelector, { timeout: 10000 }); // Wait up to 10s
+      await page.click(acceptButtonSelector);
+      console.log('[ScraperService] Cookie consent accepted.');
+      // Wait a moment for the page to process the click
+      await new Promise(res => setTimeout(res, 2000));
+    } catch (e) {
+      console.log('[ScraperService] Cookie consent banner not found or already handled. Continuing...');
+    }
+    // --- END NEW ---
+
     let hasMorePages = true;
     let pageNumber = 1;
     const pageSize = 48; // Coles API uses a page size of 48
