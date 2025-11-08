@@ -126,7 +126,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      dumpio: false,
+      dumpio: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
     });
 
