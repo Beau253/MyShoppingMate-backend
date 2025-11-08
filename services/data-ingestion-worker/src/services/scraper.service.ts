@@ -32,7 +32,11 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage' // Prevent shared memory issues in Docker
+        '--disable-dev-shm-usage', // Prevent shared memory issues in Docker
+        '--disable-gpu', // Disable GPU hardware acceleration.\
+        '--disable-accelerated-2d-canvas', // More GPU-related disabling
+        '--no-zygote', // Helps in resource-constrained environments
+        '--single-process', // Use a single process (optional, but can help)
       ],
       
     });
