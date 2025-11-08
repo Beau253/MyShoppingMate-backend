@@ -24,7 +24,6 @@ interface ProductSummary {
   Stockcode: number;
   DisplayName: string;
 }
-
 /**
  * Scrapes Woolworths using a headless browser to mimic user behavior.
  */
@@ -33,6 +32,7 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
   console.log(`[ScraperService] Launching headless browser for query: "${query}"`);
 
   try {
+    // Launch Puppeteer. The '--no-sandbox' flag is crucial for running in Docker.
     browser = await puppeteer.launch({
       headless: true,
       dumpio: false, // Set to false for cleaner production logs
@@ -46,6 +46,7 @@ async function scrapeWoolworthsAPI(query: string, page: number = 1): Promise<Pro
 
     const browserPage = await browser.newPage();
     await browserPage.setUserAgent(USER_AGENT);
+    // Set a realistic viewport to mimic a real user.
     await browserPage.setViewport({ width: 1920, height: 1080 });
 
     // --- STEP 1: Get the summary list of products ---
