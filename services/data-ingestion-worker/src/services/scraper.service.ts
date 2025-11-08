@@ -54,7 +54,7 @@ async function scrapeWoolworthsAPI(query: string, filters: WoolworthsFilter[] = 
     // Now, execute a fetch request from within the browser context with our custom payload.
     console.log('[ScraperService] Executing filtered search via fetch...');
     const products = await browserPage.evaluate(
-      async (apiUrl, searchTerm, filterList, pageNum) => {
+      (apiUrl, searchTerm, filterList, pageNum) => { // REMOVED async keyword here
         // Using .then() chains instead of async/await to avoid transpilation issues inside evaluate().
         return fetch(apiUrl, {
           method: 'POST',
