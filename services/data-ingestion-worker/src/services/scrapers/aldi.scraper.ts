@@ -4,6 +4,18 @@ import { Product, ScraperFunction } from './types';
 const API_URL = 'https://api.aldi.com.au/v3/product-search';
 const PAGE_SIZE = 30; // Based on the HAR file analysis
 
+/**
+ * Creates a URL-friendly slug from a string.
+ * e.g., "My Product Name!" -> "my-product-name"
+ * @param text The text to slugify.
+ * @returns A URL-friendly slug.
+ */
+const createSlug = (text: string): string => {
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '') // Remove special characters
+    .trim().replace(/\s+/g, '-'); // Replace spaces with hyphens
+};
+
 // Define interfaces for the expected ALDI API response structure for type safety
 interface AldiProduct {
   sku: string;
@@ -68,16 +80,23 @@ export const scrapeAldi: ScraperFunction = async (query: string): Promise<Produc
         continue;
       }
 
-      const mappedProducts: Product[] = products.map(p => ({
-        gtin: p.sku,
-        name: p.name,
-        brand: p.brandName || 'ALDI', // Default to ALDI if brand is null
-        price: p.price.amount / 100, // Convert cents to dollars
-        imageUrl: p.assets[0]?.url.replace('{width}', '300') || '', // Get a reasonable image size
-        size: p.sellingSize || 'N/A',
-        store: 'Aldi' as const,
-        categories: [], // No category data in this simple API response
-      }));
+      const mappedProducts: Product[] = products.map(p => {
+        const slug = createSlug(p.name);
+        const imageUrl = p.assets[0]?.url
+          .replace('{width}', '300')
+          .replace('{slug}', slug) || '';
+
+        return {
+          gtin: p.sku,
+          name: p.name,
+          brand: p.brandName || 'ALDI', // Default to ALDI if brand is null
+          price: p.price.amount / 100, // Convert cents to dollars
+          imageUrl: imageUrl,
+          size: p.sellingSize || 'N/A',
+          store: 'Aldi' as const,
+          categories: [], // No category data in this simple API response
+        };
+      });
 
       allProducts.push(...mappedProducts);
 
