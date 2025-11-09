@@ -18,10 +18,7 @@ async function runTest() {
   } catch (error) {
     console.error('[Local Test] A critical error occurred:', error);
   } finally {
-    console.log('[Local Test] Script finished. You can now close the browser if it is still open.');
-    // We add a long delay so the browser doesn't close immediately,
-    // allowing you to inspect the final page state.
-    await new Promise(res => setTimeout(res, 300000)); // 5-minute delay
+    console.log('[Local Test] Script finished.');
   }
 }
 
