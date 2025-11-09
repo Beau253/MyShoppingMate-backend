@@ -6,7 +6,7 @@ export interface Product {
   price: number;
   imageUrl: string;
   size: string;
-  store: 'Woolworths' | 'Coles';
+  store: 'Woolworths' | 'Coles' | 'Aldi';
   categories: string[];
 }
 
@@ -17,4 +17,3 @@ export interface WoolworthsFilter {
 }
 
 export type ScraperFunction = (query: string, filters?: WoolworthsFilter[]) => Promise<Product[]>;
-
