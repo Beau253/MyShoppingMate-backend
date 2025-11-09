@@ -147,6 +147,7 @@ services:
       - rabbitmq
     environment:
       RABBITMQ_URI: "amqp://myuser:mypassword@rabbitmq"
+      NODE_ENV: production
     shm_size: '2gb' # Increase shared memory to prevent headless Chrome crashes.
     networks:
       - app-network

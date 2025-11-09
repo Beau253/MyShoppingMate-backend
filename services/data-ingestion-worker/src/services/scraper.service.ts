@@ -126,9 +126,8 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
 
   try {
     browser = await puppeteer.launch({
-      // IMPORTANT FOR DEBUGGING: Set to false to see what the browser is doing.
-      // Set back to true for production.
-      headless: false, 
+      // Run headful (with a GUI) in dev, and headless in production
+      headless: process.env.NODE_ENV === 'production',
       dumpio: false,
       args: [
         '--no-sandbox',
@@ -138,10 +137,13 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
         '--no-zygote' // Adds further stability in some container environments.
       ],
     });
+    console.log('[ScraperService] Browser launched successfully.');
 
     const page = await browser.newPage();
+    console.log('[ScraperService] New page created.');
     await page.setUserAgent(USER_AGENT);
     await page.setViewport({ width: 1920, height: 1080 });
+    console.log('[ScraperService] User agent and viewport set.');
 
     // Handle Cookie Consent Banner
     // This is a crucial step. Many sites won't load full content until cookies are accepted.
@@ -165,7 +167,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
     const noResultsSelector = '[data-testid="search-no-results"]';
 
     while (hasMorePages) {
-      console.log(`[ScraperService] Scraping Coles page ${pageNumber}...`);
+      console.log(`[ScraperService] Navigating to Coles search page ${pageNumber} for query: "${query}"`);
       const searchUrl = `https://www.coles.com.au/en/search?q=${encodeURIComponent(query)}&page=${pageNumber}`;
 
       // --- NEW: Promise.race IMPLEMENTATION ---
@@ -176,6 +178,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
           if (response.url().startsWith(COLES_SEARCH_API_URL) && response.request().method() === 'GET') {
             page.off('response', requestHandler);
             console.log(`[ScraperService] Intercepted Coles API response.`);
+            console.log('[ScraperService] Parsing API response JSON...');
             if (response.ok()) {
               resolve(await response.json());
             } else {
@@ -199,6 +202,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
 
       // Race the two promises. Whichever finishes first wins.
       const raceResult = await Promise.race([responsePromise, noResultsPromise]);
+      console.log('[ScraperService] Page navigation and data interception complete.');
 
       if (raceResult.noResults) {
         console.log('[ScraperService] No more products found. Ending pagination.');
@@ -208,6 +212,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
       
       const data = raceResult;
       const results = data.results || [];
+      console.log(`[ScraperService] Found ${results.length} items on page ${pageNumber}.`);
 
       if (results.length === 0 || results.length < 48) {
         hasMorePages = false;
@@ -215,6 +220,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
       }
 
       const mappedProducts: Product[] = results
+        .filter((p: any) => p && p._type === 'PRODUCT') // Added a check for p to be truthy
         .filter((p: any) => p._type === 'PRODUCT')
         .map((product: any) => {
           const imageUrl = (product.imageUris && product.imageUris.length > 0)
@@ -233,6 +239,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
           };
       });
 
+      console.log(`[ScraperService] Mapped ${mappedProducts.length} products from page ${pageNumber}.`);
       allProducts.push(...mappedProducts);
       pageNumber++;
     }
