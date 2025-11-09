@@ -126,8 +126,10 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
 
   try {
     browser = await puppeteer.launch({
-      headless: true,
-      dumpio: false, // Disable to prevent noisy GPU error logs.
+      // IMPORTANT FOR DEBUGGING: Set to false to see what the browser is doing.
+      // Set back to true for production.
+      headless: false, 
+      dumpio: false,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -141,7 +143,7 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
     await page.setUserAgent(USER_AGENT);
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // --- NEW: Handle Cookie Consent Banner ---
+    // Handle Cookie Consent Banner
     // This is a crucial step. Many sites won't load full content until cookies are accepted.
     try {
       console.log('[ScraperService] Navigating to Coles homepage to handle cookie consent...');
@@ -155,72 +157,79 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
     } catch (e) {
       console.log('[ScraperService] Cookie consent banner not found or already handled. Continuing...');
     }
-    // --- END NEW ---
 
     let hasMorePages = true;
     let pageNumber = 1;
 
-    // Use a promise-based approach to handle the interception for each page.
-    const responsePromise = (page: Page): Promise<any> =>
-      new Promise((resolve, reject) => { //NOSONAR
+    // This selector targets the "No results" message on the Coles website.
+    const noResultsSelector = '[data-testid="search-no-results"]';
+
+    while (hasMorePages) {
+      console.log(`[ScraperService] Scraping Coles page ${pageNumber}...`);
+      const searchUrl = `https://www.coles.com.au/en/search?q=${encodeURIComponent(query)}&page=${pageNumber}`;
+
+      // --- NEW: Promise.race IMPLEMENTATION ---
+
+      // Promise 1: Waits for the API response
+      const responsePromise = new Promise<any>((resolve, reject) => { //NOSONAR
         const requestHandler = async (response: HTTPResponse) => {
           if (response.url().startsWith(COLES_SEARCH_API_URL) && response.request().method() === 'GET') {
-            page.off('response', requestHandler); // Clean up listener
-            console.log(`[ScraperService] Intercepted Coles API response from: ${response.url()}`);
+            page.off('response', requestHandler);
+            console.log(`[ScraperService] Intercepted Coles API response.`);
             if (response.ok()) {
-              try {
-                const data = await response.json();
-                resolve(data);
-              } catch (e) {
-                reject(new Error('Failed to parse Coles API JSON response.'));
-              }
+              resolve(await response.json());
             } else {
               reject(new Error(`Coles API responded with status ${response.status()}`));
             }
           }
         };
         page.on('response', requestHandler);
-        setTimeout(() => reject(new Error('Timeout waiting for Coles API response.')), 30000);
       });
 
-    while (hasMorePages) {
-      console.log(`[ScraperService] Scraping Coles page ${pageNumber}...`);
-      const searchUrl = `https://www.coles.com.au/en/search?q=${encodeURIComponent(query)}&page=${pageNumber}`;
+      // Promise 2: Waits for the "No results" element to appear
+      const noResultsPromise = page.waitForSelector(noResultsSelector, { timeout: 30000 })
+        .then(() => {
+            console.log('[ScraperService] "No results" element found on page.');
+            // We resolve with a specific value to identify that this promise won.
+            return { noResults: true }; 
+        });
 
-      // Start navigation and listening for the response concurrently to avoid a race condition.
-      const interceptionPromise = responsePromise(page);
+      // Start navigation
       await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      // Wait for both the API interception and the page navigation to complete.
-      // We only care about the result from the interception.
-      const data = await interceptionPromise;
+      // Race the two promises. Whichever finishes first wins.
+      const raceResult = await Promise.race([responsePromise, noResultsPromise]);
+
+      if (raceResult.noResults) {
+        console.log('[ScraperService] No more products found. Ending pagination.');
+        hasMorePages = false;
+        continue;
+      }
+      
+      const data = raceResult;
       const results = data.results || [];
 
-      // Check if this is the last page
-      if (results.length === 0 || results.length < 48 /* Coles page size */) {
+      if (results.length === 0 || results.length < 48) {
         hasMorePages = false;
-        console.log(`[ScraperService] Page ${pageNumber} has fewer than 48 products. Assuming this is the last page.`);
+        console.log(`[ScraperService] This is the last page of results.`);
       }
 
-      console.log(`[ScraperService] Scraped ${results.length} raw products from page ${pageNumber}.`);
-
       const mappedProducts: Product[] = results
-        .filter((p: any) => p._type === 'PRODUCT') // Filter out ad tiles
+        .filter((p: any) => p._type === 'PRODUCT')
         .map((product: any) => {
-          // --- CORRECTED MAPPING LOGIC BASED ON HAR ANALYSIS ---
           const imageUrl = (product.imageUris && product.imageUris.length > 0)
               ? `${COLES_IMAGE_BASE_URL}${product.imageUris[0].uri}`
               : '';
 
           return {
-            gtin: String(product.id || 'N/A'), // Use product.id, not adId
+            gtin: String(product.id || 'N/A'),
             name: product.name || 'N/A',
             brand: product.brand || 'N/A',
             price: product.pricing?.now || 0,
-            imageUrl: imageUrl, // Use the correctly constructed image URL
+            imageUrl: imageUrl,
             size: product.size || 'N/A',
             store: 'Coles' as const,
-            categories: [], // Still no category data from this endpoint
+            categories: [],
           };
       });
 
@@ -228,18 +237,21 @@ async function scrapeColesAPI(query: string): Promise<Product[]> {
       pageNumber++;
     }
 
-    console.log(`[ScraperService] Coles pagination complete. Total products: ${allProducts.length}.`);
+    console.log(`[ScraperService] Coles scraping complete. Total products: ${allProducts.length}.`);
     return allProducts;
 
   } catch (error) {
     const err = error as Error;
     console.error(`[ScraperService] An error occurred during Coles scraping: ${err.message}`);
-    // Capture a screenshot on error for debugging
+    // Capture a screenshot on error for debugging. This is extremely helpful!
     if (browser) {
-        const page = (await browser.pages())[0];
-        await page.screenshot({ path: 'coles_error_screenshot.png' });
+        const pages = await browser.pages();
+        if (pages.length > 0) {
+            await pages[0].screenshot({ path: 'coles_error_screenshot.png', fullPage: true });
+            console.log('[ScraperService] Error screenshot saved to coles_error_screenshot.png');
+        }
     }
-    return allProducts; // Return what we have so far.
+    return allProducts;
   } finally {
     if (browser) {
       console.log('[ScraperService] Closing browser.');
