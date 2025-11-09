@@ -9,7 +9,7 @@ async function runTest() {
   try {
     // We call the scraper directly, bypassing RabbitMQ.
     // We're hardcoding 'coles' and 'milk' for this test.
-    const products = await scraperService.scrape('woolworths', 'milk');
+    const products = await scraperService.scrape('coles', 'milk');
 
     console.log(`[Local Test] Scraping finished. Found ${products.length} products.`);
     if (products.length > 0) {

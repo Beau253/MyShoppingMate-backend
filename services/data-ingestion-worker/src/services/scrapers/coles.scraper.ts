@@ -2,6 +2,7 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { Browser, Page, HTTPResponse } from 'puppeteer';
+import * as fs from 'fs/promises';
 import { Product, ScraperFunction } from './types';
 
 puppeteer.use(StealthPlugin());
@@ -59,7 +60,7 @@ export const scrapeColes: ScraperFunction = async (query: string): Promise<Produ
 
     while (hasMorePages) {
       console.log(`[ColesScraper] Navigating to search page ${pageNumber} for query: "${query}"`);
-      const searchUrl = `https://www.coles.com.au/en/search?q=${encodeURIComponent(query)}&page=${pageNumber}`;
+      const searchUrl = `https://www.coles.com.au/search/products?q=${encodeURIComponent(query)}&page=${pageNumber}`;
 
       const responsePromise = new Promise<any>((resolve, reject) => { //NOSONAR
         const requestHandler = async (response: HTTPResponse) => {
@@ -131,9 +132,13 @@ export const scrapeColes: ScraperFunction = async (query: string): Promise<Produ
     if (browser) {
         try {
             const pages = await browser.pages();
-            if (pages.length > 0) {
-                await pages[0].screenshot({ path: 'coles_error_screenshot.png', fullPage: true });
+            const page = pages.length > 0 ? pages[0] : null;
+            if (page) {
+                await page.screenshot({ path: 'coles_error_screenshot.png', fullPage: true });
                 console.log('[ColesScraper] Error screenshot saved to coles_error_screenshot.png');
+                const htmlContent = await page.content();
+                await fs.writeFile('coles_error_page.html', htmlContent);
+                console.log('[ColesScraper] Error page HTML saved to coles_error_page.html');
             }
         } catch (screenshotError) {
             console.error(`[ColesScraper] Failed to take screenshot: ${(screenshotError as Error).message}`);
@@ -147,4 +152,3 @@ export const scrapeColes: ScraperFunction = async (query: string): Promise<Produ
     }
   }
 }
-
