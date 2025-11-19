@@ -1,12 +1,17 @@
 import amqp from 'amqplib';
 import { scraperService } from './services/scraper.service';
 
-const RABBITMQ_URI = process.env.RABBITMQ_URI || 'amqp://myuser:mypassword@rabbitmq';
+const RABBITMQ_URI = process.env.RABBITMQ_URI;
+
+if (!RABBITMQ_URI) {
+  console.error('RABBITMQ_URI environment variable is not set.');
+  process.exit(1);
+}
 
 async function startWorker() {
   console.log('Starting data ingestion worker...');
   try {
-    const connection = await amqp.connect(RABBITMQ_URI);
+    const connection = await amqp.connect(RABBITMQ_URI as string);
     const channel = await connection.createChannel();
     console.log('Successfully connected to RabbitMQ.');
 
@@ -22,10 +27,10 @@ async function startWorker() {
       if (msg !== null) {
         const jobPayload = msg.content.toString();
         console.log(`[x] Received job: ${jobPayload}`);
-        
+
         try {
           const { target, query } = JSON.parse(jobPayload);
-          
+
           if (!target || !query) {
             throw new Error('Invalid job payload. "target" and "query" are required.');
           }
@@ -33,7 +38,7 @@ async function startWorker() {
           // --- CALL THE SCRAPER SERVICE ---
           const scrapedData = await scraperService.scrape(target, query);
           console.log('Scraping completed. Result:', scrapedData);
-          
+
           // In a real implementation, you would now publish this scrapedData
           // to a different queue for the price-data-service to process.
 
