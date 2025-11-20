@@ -4,8 +4,8 @@ services:
   # ============================================
   # Infrastructure Services
   # ============================================
-  
-  # PostgreSQL Database - Used by auth-service and list-service
+
+  # PostgreSQL Database - Used by auth-service, list-service, and price-data-service
   postgres:
     image: postgres:15-alpine
     container_name: msm_postgres
@@ -21,12 +21,12 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # MongoDB Database - Used by product-catalog-service and price-data-service
+  # MongoDB Database - Used by product-catalog-service
   mongo:
     image: mongo:6
     container_name: msm_mongo
@@ -53,7 +53,7 @@ services:
       RABBITMQ_DEFAULT_USER: rabbitmq
       RABBITMQ_DEFAULT_PASS: rabbitmq_password
     ports:
-      - "5672:5672"   # AMQP port
+      - "5672:5672" # AMQP port
       - "15672:15672" # Management UI
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
@@ -75,8 +75,8 @@ services:
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:8000"
     ports:
-      - "8000:8000"   # Main application port
-      - "8080:8080"   # Traefik dashboard
+      - "8000:8000" # Main application port
+      - "8080:8080" # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -167,7 +167,7 @@ services:
     container_name: msm_price_data_service
     environment:
       PORT: 3003
-      MONGO_URI: mongodb://mongo:mongo_password@mongo:27017/price_data?authSource=admin
+      DATABASE_URL: postgresql://postgres:postgres_password@postgres:5432/myshoppingmate
       NODE_ENV: production
     labels:
       - "traefik.enable=true"
@@ -177,7 +177,7 @@ services:
     networks:
       - app-network
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 

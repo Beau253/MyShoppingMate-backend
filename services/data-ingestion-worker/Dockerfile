@@ -1,5 +1,5 @@
 # --- Stage 1: Build Stage ---
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 WORKDIR /usr/src/app
 COPY package*.json ./
 RUN npm install
@@ -8,7 +8,7 @@ RUN chmod +x -R /usr/src/app/node_modules/.bin
 RUN npm run build
 
 # --- Stage 2: Production Stage ---
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
