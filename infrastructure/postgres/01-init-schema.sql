@@ -47,6 +47,22 @@ CREATE TABLE prices (
     PRIMARY KEY(timestamp, product_gtin, store_id)
 );
 
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_shopping_lists_user_id ON shopping_lists(user_id);
+-- Create a composite index for fast price lookups
+CREATE INDEX idx_prices_product_store_time ON prices(product_gtin, store_id, timestamp DESC);
+
+-- Seed some initial store data
+INSERT INTO stores (name, chain) VALUES
+('ALDI', 'ALDI'),
+('Coles', 'Coles'),
+('Woolworths', 'Woolworths');
+
+-- Function and Triggers to update timestamps
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
