@@ -1,9 +1,213 @@
-# Docker Compose file version. Version 3.8 is a modern, stable choice.
 version: '3.8'
 
-# Defines all the containers (services) that make up our application.
+services:
+  # ============================================
+  # Infrastructure Services
+  # ============================================
+  
+  # PostgreSQL Database - Used by auth-service and list-service
+  postgres:
+    image: postgres:15-alpine
+    container_name: msm_postgres
+    environment:
+      POSTGRES_DB: myshoppingmate
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-# Networks define a shared network for containers to communicate with each other.
+  # MongoDB Database - Used by product-catalog-service and price-data-service
+  mongo:
+    image: mongo:6
+    container_name: msm_mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo
+      MONGO_INITDB_ROOT_PASSWORD: mongo_password
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - app-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RabbitMQ Message Queue - Used by data-ingestion-worker
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: msm_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbitmq
+      RABBITMQ_DEFAULT_PASS: rabbitmq_password
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - app-network
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Traefik Reverse Proxy - Routes traffic to microservices
+  traefik:
+    image: traefik:v2.10
+    container_name: msm_traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:8000"
+    ports:
+      - "8000:8000"   # Main application port
+      - "8080:8080"   # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - app-network
+    depends_on:
+      - auth-service
+      - list-service
+      - product-catalog-service
+      - price-data-service
+
+  # ============================================
+  # Application Services
+  # ============================================
+
+  # Authentication Service
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: msm_auth_service
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres_password@postgres:5432/myshoppingmate
+      JWT_SECRET: your_super_secret_jwt_key_change_in_production
+      NODE_ENV: production
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=PathPrefix(`/auth`)"
+      - "traefik.http.routers.auth.entrypoints=web"
+      - "traefik.http.services.auth.loadbalancer.server.port=3000"
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Shopping List Service
+  list-service:
+    build:
+      context: ./services/list-service
+      dockerfile: Dockerfile
+    container_name: msm_list_service
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:postgres_password@postgres:5432/myshoppingmate
+      JWT_SECRET: your_super_secret_jwt_key_change_in_production
+      NODE_ENV: production
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lists.rule=PathPrefix(`/lists`)"
+      - "traefik.http.routers.lists.entrypoints=web"
+      - "traefik.http.services.lists.loadbalancer.server.port=3001"
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Product Catalog Service
+  product-catalog-service:
+    build:
+      context: ./services/product-catalog-service
+      dockerfile: Dockerfile
+    container_name: msm_product_catalog_service
+    environment:
+      PORT: 3002
+      MONGO_URI: mongodb://mongo:mongo_password@mongo:27017/product_catalog?authSource=admin
+      NODE_ENV: production
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.products.rule=PathPrefix(`/products`)"
+      - "traefik.http.routers.products.entrypoints=web"
+      - "traefik.http.services.products.loadbalancer.server.port=3002"
+    networks:
+      - app-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Price Data Service
+  price-data-service:
+    build:
+      context: ./services/price-data-service
+      dockerfile: Dockerfile
+    container_name: msm_price_data_service
+    environment:
+      PORT: 3003
+      MONGO_URI: mongodb://mongo:mongo_password@mongo:27017/price_data?authSource=admin
+      NODE_ENV: production
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prices.rule=PathPrefix(`/prices`)"
+      - "traefik.http.routers.prices.entrypoints=web"
+      - "traefik.http.services.prices.loadbalancer.server.port=3003"
+    networks:
+      - app-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Data Ingestion Worker (Background Service)
+  data-ingestion-worker:
+    build:
+      context: ./services/data-ingestion-worker
+      dockerfile: Dockerfile
+    container_name: msm_data_ingestion_worker
+    environment:
+      RABBITMQ_URI: amqp://rabbitmq:rabbitmq_password@rabbitmq:5672
+      NODE_ENV: production
+    networks:
+      - app-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+# ============================================
+# Networks
+# ============================================
 networks:
   app-network:
     driver: bridge
+
+# ============================================
+# Volumes for Data Persistence
+# ============================================
+volumes:
+  postgres_data:
+  mongo_data:
+  rabbitmq_data:
