@@ -179,6 +179,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   # Data Ingestion Worker (Background Service)
