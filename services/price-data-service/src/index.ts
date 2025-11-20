@@ -7,19 +7,31 @@ import { config } from './config';
 
 const startServer = async () => {
   // Call the function
-  await connectDB();
+  import express from 'express';
+  import cors from 'cors';
+  import { connectDB } from './data/db';
+  import priceRoutes from './api/price.routes';
+  import storeRoutes from './api/store.routes';
+  import { config } from './config';
 
-  const app = express();
-  app.use(cors());
-  app.use(express.json());
+  const startServer = async () => {
+    // Call the function
+    await connectDB();
 
-  app.use('/prices', priceRoutes);
-  app.use('/stores', storeRoutes);
+    const app = express();
+    app.use(cors());
+    app.use(express.json());
 
+    app.use('/prices', priceRoutes);
+    app.use('/stores', storeRoutes);
 
-  app.listen(config.port, () => {
-    console.log(`Price Data service running on port ${config.port}`);
-  });
-};
+    app.get('/health', (req, res) => {
+      res.status(200).send('OK');
+    });
 
-startServer();
+    app.listen(config.port, () => {
+      console.log(`Price Data service running on port ${config.port}`);
+    });
+  };
+
+  startServer();
