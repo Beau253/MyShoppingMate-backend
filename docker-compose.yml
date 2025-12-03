@@ -207,18 +207,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Frontend (Flutter Web)
-  frontend:
-    build:
-      context: ../MyShoppingMate
-      dockerfile: Dockerfile
-    container_name: msm_frontend
-    ports:
-      - "8081:80"
-    networks:
-      - app-network
-    depends_on:
-      - traefik
+  # Frontend (Flutter Web) - Commented out as we are running mobile app locally
+  # frontend:
+  #   build:
+  #     context: ../MyShoppingMate
+  #     dockerfile: Dockerfile
+  #   container_name: msm_frontend
+  #   ports:
+  #     - "8081:80"
+  #   networks:
+  #     - app-network
+  #   depends_on:
+  #     - traefik
 
 # ============================================
 # Networks
