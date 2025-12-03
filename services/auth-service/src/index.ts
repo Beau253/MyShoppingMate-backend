@@ -9,7 +9,10 @@ const app = express();
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:8081', 'http://localhost:8000'],
+  credentials: true,
+}));
 app.use(express.json());
 
 // Rate limiting

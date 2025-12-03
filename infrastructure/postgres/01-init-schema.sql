@@ -8,6 +8,8 @@ CREATE TABLE users (
     email VARCHAR(255) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    reset_token_hash VARCHAR(255),
+    reset_token_expiry TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
